@@ -1,0 +1,372 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Players = game:GetService("Players")
+local GuiService = game:GetService("GuiService")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- [[ Global Variables ]] --
+getgenv().SecretPoint = Vector3.new(0, 2000, 0) 
+getgenv().IsMain = false
+getgenv().IsAlt = false
+getgenv().InfDash = false 
+
+-- [[ Aim Lock Variables ]] --
+getgenv().AimSystemEnabled = false -- สวิตช์หลัก (Master Switch)
+getgenv().IsLocking = false -- สถานะการล็อค
+getgenv().LockedTarget = nil -- เก็บเป้าหมายที่ถูกล็อค
+
+local PlatformPart = nil
+
+-- [[ Dash Settings ]] --
+local DashAnimID = "rbxassetid://1357408709"
+local DashTime = 0.35 
+local CurrentDashSpeed = 100 
+
+-- [[ Aim Lock Settings ]] --
+local AimPart = "HumanoidRootPart" -- เล็งที่ลำตัว
+local AimSmooth = 0.5 -- ความสมูท (0.1 = เร็ว/ติดหนึบ, 0.9 = ช้า)
+
+local Window = Rayfield:CreateWindow({
+    Name = "Anime Battle Arena",
+    Icon = 0,
+    LoadingTitle = "ABA Script",
+    LoadingSubtitle = "Aim Fixed v3",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = { Enabled = true, FileName = "ABAFarmCombatConfig" },
+    KeySystem = false,
+})
+
+-- [[ สร้าง Tabs ]] --
+local FarmTab = Window:CreateTab("Auto Farm", nil)
+local CombatTab = Window:CreateTab("Combat", nil)
+
+-- ==========================================
+-- [[ Dash Functions ]] --
+-- ==========================================
+local function PerformDash()
+    local Character = LocalPlayer.Character
+    if not Character then return end
+    
+    local RootPart = Character:FindFirstChild("HumanoidRootPart")
+    local Humanoid = Character:FindFirstChild("Humanoid")
+    if not RootPart or not Humanoid then return end
+
+    local camCFrame = Camera.CFrame
+    local lookVec = camCFrame.LookVector * Vector3.new(1, 0, 1)
+    local rightVec = camCFrame.RightVector * Vector3.new(1, 0, 1)
+    
+    if lookVec.Magnitude > 0 then lookVec = lookVec.Unit end
+    if rightVec.Magnitude > 0 then rightVec = rightVec.Unit end
+
+    local moveDir = Vector3.new(0, 0, 0)
+    local isPressed = false
+
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + lookVec isPressed = true end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - lookVec isPressed = true end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - rightVec isPressed = true end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + rightVec isPressed = true end
+
+    if not isPressed then
+        moveDir = -lookVec
+    end
+
+    if moveDir.Magnitude > 0 then
+        moveDir = moveDir.Unit
+    end
+
+    local Anim = Instance.new("Animation")
+    Anim.AnimationId = DashAnimID
+    local Track = Humanoid:LoadAnimation(Anim)
+    Track.Priority = Enum.AnimationPriority.Action
+    Track:Play()
+
+    local BV = Instance.new("BodyVelocity")
+    BV.Name = "CustomDashVelocity"
+    BV.MaxForce = Vector3.new(math.huge, 0, math.huge) 
+    BV.Velocity = moveDir * CurrentDashSpeed 
+    BV.Parent = RootPart
+
+    task.spawn(function()
+        task.wait(DashTime)
+        if BV then BV:Destroy() end
+        if Track then Track:Stop() end
+    end)
+end
+
+local function HandleDashInput(actionName, inputState, inputObject)
+    if inputState == Enum.UserInputState.Begin then
+        if not UserInputService:GetFocusedTextBox() then
+            if getgenv().InfDash then
+                PerformDash()
+            end
+        end
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+ContextActionService:BindAction("CustomDashAction", HandleDashInput, false, Enum.KeyCode.Q)
+
+
+-- ==========================================
+-- [[ FIXED AIM LOGIC ]] --
+-- ==========================================
+
+local function GetClosestPlayerToMouse()
+    local closestDist = math.huge
+    local target = nil
+    local mouse = LocalPlayer:GetMouse()
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(AimPart) then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character[AimPart].Position)
+                if onScreen then
+                    local dist = (Vector2.new(mouse.X, mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                    -- ปรับระยะการค้นหา (FOV) ถ้าต้องการให้ล็อคง่ายขึ้นให้เพิ่มตัวเลขนี้
+                    if dist < 500 and dist < closestDist then
+                        closestDist = dist
+                        target = player.Character[AimPart]
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+-- ระบบทำงาน Loop ตลอดเวลา (แต่จะล็อคเมื่อเงื่อนไขครบ)
+RunService.RenderStepped:Connect(function()
+    if getgenv().AimSystemEnabled and getgenv().IsLocking and getgenv().LockedTarget then
+        local target = getgenv().LockedTarget
+        
+        -- เช็คความถูกต้องของเป้าหมาย
+        if target.Parent and target.Parent:FindFirstChild("Humanoid") and target.Parent.Humanoid.Health > 0 then
+            local currentCF = Camera.CFrame
+            local targetCF = CFrame.new(currentCF.Position, target.Position)
+            Camera.CFrame = currentCF:Lerp(targetCF, 1 - AimSmooth)
+        else
+            -- ถ้าเป้าหมายตาย ให้หยุดล็อค
+            getgenv().IsLocking = false
+            getgenv().LockedTarget = nil
+            -- Rayfield:Notify({Title = "Aim Lock", Content = "Target Dead/Lost", Duration = 1})
+        end
+    end
+end)
+
+-- ==========================================
+-- [[ Auto Farm Logic ]] --
+-- ==========================================
+-- (ส่วนเดิมไม่เปลี่ยนแปลง)
+
+local function IsSafeToAttack()
+    if GuiService.MenuIsOpen then return false end
+    if UserInputService:GetFocusedTextBox() then return false end
+    return true
+end
+
+local function IsCharacterReady(char)
+    if not char then return false end
+    if not char.Parent then return false end
+    local hum = char:FindFirstChild("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if hum and root and hum.Health > 0 then
+        return true, root, hum
+    end
+    return false
+end
+
+local function CreatePlatform()
+    if not PlatformPart or not PlatformPart.Parent then
+        PlatformPart = Instance.new("Part")
+        PlatformPart.Name = "FarmPlatform"
+        PlatformPart.Size = Vector3.new(50, 2, 50)
+        PlatformPart.Position = getgenv().SecretPoint - Vector3.new(0, 4, 0)
+        PlatformPart.Anchored = true
+        PlatformPart.CanCollide = true
+        PlatformPart.Color = Color3.fromRGB(0, 150, 255)
+        PlatformPart.Parent = workspace
+    else
+        PlatformPart.Position = getgenv().SecretPoint - Vector3.new(0, 4, 0)
+    end
+end
+
+local function GetTargetAtSecretPoint()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local ready, root, _ = IsCharacterReady(player.Character)
+            if ready then
+                local dist = (root.Position - getgenv().SecretPoint).Magnitude
+                if dist < 50 then 
+                    return root
+                end
+            end
+        end
+    end
+    return nil
+end
+
+RunService.Heartbeat:Connect(function()
+    local myChar = LocalPlayer.Character
+    local ready, myRoot, myHum = IsCharacterReady(myChar)
+
+    if not ready then return end
+
+    if getgenv().IsAlt then
+        CreatePlatform()
+        myRoot.CFrame = CFrame.new(getgenv().SecretPoint)
+        myRoot.Velocity = Vector3.new(0,0,0)
+    end
+
+    if getgenv().IsMain then
+        CreatePlatform()
+        local targetRoot = GetTargetAtSecretPoint()
+        
+        if targetRoot then
+            if Camera.CameraSubject ~= myHum then
+                Camera.CameraSubject = myHum
+            end
+            local stickPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -2.5)
+            local lookAtPosition = targetRoot.Position
+            myRoot.CFrame = CFrame.lookAt(stickPosition, lookAtPosition)
+            myRoot.Velocity = Vector3.new(0,0,0)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if getgenv().IsMain and IsSafeToAttack() then
+            local ready, _, _ = IsCharacterReady(LocalPlayer.Character)
+            if ready then
+                pcall(function()
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                    local keys = {Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four}
+                    for _, key in ipairs(keys) do
+                        VirtualInputManager:SendKeyEvent(true, key, false, game)
+                        task.wait() 
+                        VirtualInputManager:SendKeyEvent(false, key, false, game)
+                    end
+                end)
+            end
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    task.wait(1)
+end)
+
+-- ==========================================
+-- [[ UI Elements ]] --
+-- ==========================================
+
+local MainToggle = FarmTab:CreateToggle({
+    Name = "Gold Farm ( Main Acc )",
+    CurrentValue = false,
+    Flag = "MainRole",
+    Callback = function(Value)
+        getgenv().IsMain = Value
+        if Value then getgenv().IsAlt = false end
+    end,
+})
+
+local AltToggle = FarmTab:CreateToggle({
+    Name = "Gold Farm ( Alt Acc )",
+    CurrentValue = false,
+    Flag = "AltRole",
+    Callback = function(Value)
+        getgenv().IsAlt = Value
+        if Value then getgenv().IsMain = false end
+    end,
+})
+
+local InfDashToggle = CombatTab:CreateToggle({
+    Name = "Infinite Dash",
+    CurrentValue = false,
+    Flag = "InfDash",
+    Callback = function(Value)
+        getgenv().InfDash = Value
+    end,
+})
+
+local SpeedSlider = CombatTab:CreateSlider({
+    Name = "Dash Speed ( Distance )",
+    Range = {50, 150},
+    Increment = 10,
+    Suffix = "Speed",
+    CurrentValue = 80,
+    Flag = "DashSpeedSlider",
+    Callback = function(Value)
+        CurrentDashSpeed = Value
+    end,
+})
+
+-- [[ AIM ASSIST UI ]] --
+CombatTab:CreateSection("Aim Assist")
+
+local AimEnableToggle = CombatTab:CreateToggle({
+    Name = "Enable Aim Assist",
+    CurrentValue = false,
+    Flag = "AimSystemEnabled",
+    Callback = function(Value)
+        getgenv().AimSystemEnabled = Value
+        -- ถ้าปิดสวิตช์ ให้รีเซ็ตค่าล็อคด้วย
+        if not Value then
+            getgenv().IsLocking = false
+            getgenv().LockedTarget = nil
+        end
+    end,
+})
+
+local AimLockBind = CombatTab:CreateKeybind({
+    Name = "Keybind Aim Assist",
+    CurrentKeybind = "E",
+    HoldToInteract = false, -- ตั้งเป็น false คือกดทีเดียวติด/ดับ
+    Flag = "AimLockBind",
+    Callback = function(Keybind)
+        -- เช็คว่าเปิด Master Switch หรือยัง
+        if not getgenv().AimSystemEnabled then 
+            Rayfield:Notify({
+                Title = "Aim Lock",
+                Content = "Please Enable Switch First!",
+                Duration = 2,
+                Image = nil,
+            })
+            return 
+        end
+
+        -- Logic สลับสถานะ (Sticky Logic)
+        if getgenv().IsLocking then
+            -- ถ้าล็อคอยู่ -> ปลดล็อค
+            getgenv().IsLocking = false
+            getgenv().LockedTarget = nil
+            Rayfield:Notify({Title = "Aim Lock", Content = "Unlocked", Duration = 1})
+        else
+            -- ถ้าไม่ได้ล็อค -> หาตัวใหม่
+            local target = GetClosestPlayerToMouse()
+            if target then
+                getgenv().LockedTarget = target
+                getgenv().IsLocking = true
+                Rayfield:Notify({Title = "Aim Lock", Content = "Locked: " .. target.Parent.Name, Duration = 1})
+            else
+                Rayfield:Notify({Title = "Aim Lock", Content = "No Target Found!", Duration = 1})
+            end
+        end
+    end,
+})
+
+Rayfield:Notify({
+    Title = "Script Loaded",
+    Content = "Aim Lock Fixed (Use E)",
+    Duration = 5,
+    Image = nil,
+})
