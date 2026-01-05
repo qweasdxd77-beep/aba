@@ -5,36 +5,65 @@ local Players = game:GetService("Players")
 local GuiService = game:GetService("GuiService")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
+local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local Workspace = game:GetService("Workspace")
 
 -- [[ Global Variables ]] --
-getgenv().SecretPoint = Vector3.new(0, 2000, 0) 
 getgenv().IsMain = false
 getgenv().IsAlt = false
 getgenv().InfDash = false 
+getgenv().AutoResetAlt = false 
+getgenv().ResetDelay = 1
+
+-- [[ Smart Dash Variable ]] --
+getgenv().OppositeDash = false
+
+-- [[ Hitbox Variables ]] --
+getgenv().AkainuHitbox = false
+getgenv().AkainuSize = 100
 
 -- [[ Aim Lock Variables ]] --
-getgenv().AimSystemEnabled = false -- สวิตช์หลัก (Master Switch)
-getgenv().IsLocking = false -- สถานะการล็อค
-getgenv().LockedTarget = nil -- เก็บเป้าหมายที่ถูกล็อค
-
-local PlatformPart = nil
+getgenv().AimSystemEnabled = false 
+getgenv().IsLocking = false 
+getgenv().LockedTarget = nil 
 
 -- [[ Dash Settings ]] --
-local DashAnimID = "rbxassetid://1357408709"
+local DashAnimID = "rbxassetid://1357408709" 
 local DashTime = 0.35 
 local CurrentDashSpeed = 100 
 
 -- [[ Aim Lock Settings ]] --
-local AimPart = "HumanoidRootPart" -- เล็งที่ลำตัว
-local AimSmooth = 0.5 -- ความสมูท (0.1 = เร็ว/ติดหนึบ, 0.9 = ช้า)
+local AimPart = "HumanoidRootPart"
+local AimSmooth = 0.5 
+
+-- [[ Anti-AFK ]] --
+LocalPlayer.Idled:Connect(function()
+    if getgenv().IsMain or getgenv().IsAlt then
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(600)
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.Jump = true
+            end
+        end)
+    end
+end)
 
 local Window = Rayfield:CreateWindow({
-    Name = "Anime Battle Arena",
+    Name = "ABA Script",
     Icon = 0,
     LoadingTitle = "ABA Script",
-    LoadingSubtitle = "Aim Fixed v3",
+    LoadingSubtitle = "By rfaide",
     Theme = "Default",
     DisableRayfieldPrompts = false,
     DisableBuildWarnings = false,
@@ -45,132 +74,189 @@ local Window = Rayfield:CreateWindow({
 -- [[ สร้าง Tabs ]] --
 local FarmTab = Window:CreateTab("Auto Farm", nil)
 local CombatTab = Window:CreateTab("Combat", nil)
+local HitboxTab = Window:CreateTab("Skill Hitbox", nil)
 
 -- ==========================================
--- [[ Dash Functions ]] --
+-- [[ SUPER CLICKER FUNCTION ]] --
 -- ==========================================
-local function PerformDash()
-    local Character = LocalPlayer.Character
-    if not Character then return end
-    
-    local RootPart = Character:FindFirstChild("HumanoidRootPart")
-    local Humanoid = Character:FindFirstChild("Humanoid")
-    if not RootPart or not Humanoid then return end
+local function SuperClick(btn)
+    if not btn then return end
+    if not btn.Visible then return end 
 
-    local camCFrame = Camera.CFrame
-    local lookVec = camCFrame.LookVector * Vector3.new(1, 0, 1)
-    local rightVec = camCFrame.RightVector * Vector3.new(1, 0, 1)
-    
-    if lookVec.Magnitude > 0 then lookVec = lookVec.Unit end
-    if rightVec.Magnitude > 0 then rightVec = rightVec.Unit end
+    pcall(function()
+        local events = {"MouseButton1Click", "MouseButton1Down", "Activated"}
+        for _, eventName in pairs(events) do
+            for _, conn in pairs(getconnections(btn[eventName])) do
+                conn:Fire()
+            end
+        end
+    end)
 
-    local moveDir = Vector3.new(0, 0, 0)
-    local isPressed = false
+    pcall(function()
+        local AbsolutePosition = btn.AbsolutePosition
+        local AbsoluteSize = btn.AbsoluteSize
+        local GuiInset = GuiService:GetGuiInset() 
+        
+        local x = AbsolutePosition.X + (AbsoluteSize.X / 2)
+        local y = AbsolutePosition.Y + (AbsoluteSize.Y / 2) + GuiInset.Y 
 
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + lookVec isPressed = true end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - lookVec isPressed = true end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - rightVec isPressed = true end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + rightVec isPressed = true end
-
-    if not isPressed then
-        moveDir = -lookVec
-    end
-
-    if moveDir.Magnitude > 0 then
-        moveDir = moveDir.Unit
-    end
-
-    local Anim = Instance.new("Animation")
-    Anim.AnimationId = DashAnimID
-    local Track = Humanoid:LoadAnimation(Anim)
-    Track.Priority = Enum.AnimationPriority.Action
-    Track:Play()
-
-    local BV = Instance.new("BodyVelocity")
-    BV.Name = "CustomDashVelocity"
-    BV.MaxForce = Vector3.new(math.huge, 0, math.huge) 
-    BV.Velocity = moveDir * CurrentDashSpeed 
-    BV.Parent = RootPart
-
-    task.spawn(function()
-        task.wait(DashTime)
-        if BV then BV:Destroy() end
-        if Track then Track:Stop() end
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
     end)
 end
 
-local function HandleDashInput(actionName, inputState, inputObject)
-    if inputState == Enum.UserInputState.Begin then
-        if not UserInputService:GetFocusedTextBox() then
-            if getgenv().InfDash then
-                PerformDash()
-            end
-        end
-    end
-    return Enum.ContextActionResult.Pass
-end
+-- [[ AUTO UI LOOP ]] --
+task.spawn(function()
+    while true do
+        task.wait(1) 
+        if getgenv().IsMain or getgenv().IsAlt then
+            pcall(function()
+                local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+                if not PlayerGui then return end
 
-ContextActionService:BindAction("CustomDashAction", HandleDashInput, false, Enum.KeyCode.Q)
+                local ButtonsToClick = {
+                    PlayerGui:FindFirstChild("MapBan") and PlayerGui.MapBan:FindFirstChild("Frame") and PlayerGui.MapBan.Frame:FindFirstChild("Pass"),
+                    PlayerGui:FindFirstChild("BanChooser") and PlayerGui.BanChooser:FindFirstChild("CharacterSelect") and PlayerGui.BanChooser.CharacterSelect:FindFirstChild("Pass Ban"),
+                    PlayerGui:FindFirstChild("HUD") and PlayerGui.HUD:FindFirstChild("CharacterSelect") and PlayerGui.HUD.CharacterSelect:FindFirstChild("InfoBox") and PlayerGui.HUD.CharacterSelect.InfoBox:FindFirstChild("Play"),
+                    PlayerGui:FindFirstChild("Rematch") and PlayerGui.Rematch:FindFirstChild("TextButton")
+                }
 
-
--- ==========================================
--- [[ FIXED AIM LOGIC ]] --
--- ==========================================
-
-local function GetClosestPlayerToMouse()
-    local closestDist = math.huge
-    local target = nil
-    local mouse = LocalPlayer:GetMouse()
-
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(AimPart) then
-            local humanoid = player.Character:FindFirstChild("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character[AimPart].Position)
-                if onScreen then
-                    local dist = (Vector2.new(mouse.X, mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
-                    -- ปรับระยะการค้นหา (FOV) ถ้าต้องการให้ล็อคง่ายขึ้นให้เพิ่มตัวเลขนี้
-                    if dist < 500 and dist < closestDist then
-                        closestDist = dist
-                        target = player.Character[AimPart]
+                for _, btn in pairs(ButtonsToClick) do
+                    if btn and btn.Visible then
+                        SuperClick(btn)
                     end
                 end
-            end
-        end
-    end
-    return target
-end
-
--- ระบบทำงาน Loop ตลอดเวลา (แต่จะล็อคเมื่อเงื่อนไขครบ)
-RunService.RenderStepped:Connect(function()
-    if getgenv().AimSystemEnabled and getgenv().IsLocking and getgenv().LockedTarget then
-        local target = getgenv().LockedTarget
-        
-        -- เช็คความถูกต้องของเป้าหมาย
-        if target.Parent and target.Parent:FindFirstChild("Humanoid") and target.Parent.Humanoid.Health > 0 then
-            local currentCF = Camera.CFrame
-            local targetCF = CFrame.new(currentCF.Position, target.Position)
-            Camera.CFrame = currentCF:Lerp(targetCF, 1 - AimSmooth)
-        else
-            -- ถ้าเป้าหมายตาย ให้หยุดล็อค
-            getgenv().IsLocking = false
-            getgenv().LockedTarget = nil
-            -- Rayfield:Notify({Title = "Aim Lock", Content = "Target Dead/Lost", Duration = 1})
+            end)
         end
     end
 end)
 
 -- ==========================================
--- [[ Auto Farm Logic ]] --
+-- [[ FIXED: Akainu Multi-Hitbox Logic ]] --
 -- ==========================================
--- (ส่วนเดิมไม่เปลี่ยนแปลง)
+local AkainuSkills = {
+    "Arm",
+    "LavaPool",
+    "Fist",
+    "Tar"
+}
 
-local function IsSafeToAttack()
-    if GuiService.MenuIsOpen then return false end
-    if UserInputService:GetFocusedTextBox() then return false end
-    return true
+-- ฟังก์ชันขยาย Effect ข้างใน (Particle/Light/Mesh)
+local function ExpandEffects(part)
+    for _, child in pairs(part:GetDescendants()) do
+        if child:IsA("ParticleEmitter") then
+            local newSize = getgenv().AkainuSize / 5 
+            child.Size = NumberSequence.new(newSize)
+            child.Speed = NumberSequence.new(newSize)
+        elseif child:IsA("PointLight") or child:IsA("SurfaceLight") then
+            child.Range = getgenv().AkainuSize
+        elseif child:IsA("SpecialMesh") then
+            child.Scale = child.Scale * (getgenv().AkainuSize / 10)
+        end
+    end
 end
 
+-- ฟังก์ชันหลักในการขยาย Hitbox
+local function ResizeAkainuSkill(part)
+    if not getgenv().AkainuHitbox then return end
+    if not part:IsA("BasePart") then return end
+    
+    -- เช็คชื่อสกิล
+    if table.find(AkainuSkills, part.Name) then
+        -- เช็ค Attribute กันทำซ้ำ
+        if not part:GetAttribute("HitboxExpanded") then
+            
+            -- รอสักนิดให้ Property โหลดครบ
+            task.wait() 
+            
+            local sizeAdd = getgenv().AkainuSize
+            part.Size = part.Size + Vector3.new(sizeAdd, sizeAdd, sizeAdd)
+            part.CanCollide = false
+            part.Massless = true
+            part.Transparency = 1 -- มองไม่เห็นตัว Hitbox (เห็นแต่ Effect)
+            
+            -- ขยาย Effect ข้างใน
+            ExpandEffects(part)
+
+            -- แปะป้ายว่าทำแล้ว
+            part:SetAttribute("HitboxExpanded", true)
+            
+            -- [DEBUG] ปริ้นท์บอกว่าขยายแล้ว (กด F9 ดูได้ถ้าสงสัย)
+            -- print("Expanded: " .. part.Name)
+        end
+    end
+end
+
+-- [[ NEW LOGIC: เจาะจง Folder Thrown โดยเฉพาะ ]] --
+local function SetupHitboxListener()
+    local ThrownFolder = Workspace:WaitForChild("Thrown", 5)
+    
+    if ThrownFolder then
+        -- 1. จัดการของที่มีอยู่แล้วทั้งหมดในทันที
+        for _, child in pairs(ThrownFolder:GetChildren()) do
+            task.spawn(function() ResizeAkainuSkill(child) end)
+        end
+        
+        -- 2. เฝ้าระวังของใหม่ที่เข้ามาใน Thrown โดยตรง (แม่นยำกว่า DescendantAdded)
+        ThrownFolder.ChildAdded:Connect(function(child)
+            task.spawn(function() ResizeAkainuSkill(child) end)
+        end)
+    else
+        -- ถ้าหา Folder ไม่เจอให้ใช้วิธีเดิมสำรองไว้
+        Workspace.DescendantAdded:Connect(function(descendant)
+            if descendant.Parent and descendant.Parent.Name == "Thrown" then
+                task.spawn(function() ResizeAkainuSkill(descendant) end)
+            end
+        end)
+    end
+end
+
+-- เรียกใช้ฟังก์ชัน Setup
+task.spawn(SetupHitboxListener)
+
+-- [[ FAILSAFE LOOP: วนเช็คซ้ำทุก 0.5 วิ (กันพลาด) ]] --
+task.spawn(function()
+    while true do
+        task.wait(0.5) -- เช็คถี่ขึ้น
+        if getgenv().AkainuHitbox then
+            local thrown = Workspace:FindFirstChild("Thrown")
+            if thrown then
+                for _, child in pairs(thrown:GetChildren()) do
+                    if not child:GetAttribute("HitboxExpanded") then
+                        ResizeAkainuSkill(child)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- [[ Loop Reset for Alt ]] --
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(0.5) 
+        if getgenv().IsAlt then
+            pcall(function()
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("Humanoid") then
+                    if char.Humanoid.Health > 0 then
+                        task.wait(getgenv().ResetDelay)
+                        if getgenv().IsAlt and char.Humanoid.Health > 0 then
+                            char.Humanoid.Health = 0
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- [[ Helper Functions ]] --
+-- ==========================================
 local function IsCharacterReady(char)
     if not char then return false end
     if not char.Parent then return false end
@@ -182,36 +268,30 @@ local function IsCharacterReady(char)
     return false
 end
 
-local function CreatePlatform()
-    if not PlatformPart or not PlatformPart.Parent then
-        PlatformPart = Instance.new("Part")
-        PlatformPart.Name = "FarmPlatform"
-        PlatformPart.Size = Vector3.new(50, 2, 50)
-        PlatformPart.Position = getgenv().SecretPoint - Vector3.new(0, 4, 0)
-        PlatformPart.Anchored = true
-        PlatformPart.CanCollide = true
-        PlatformPart.Color = Color3.fromRGB(0, 150, 255)
-        PlatformPart.Parent = workspace
-    else
-        PlatformPart.Position = getgenv().SecretPoint - Vector3.new(0, 4, 0)
-    end
-end
+local function GetClosestEnemy()
+    local closestDist = math.huge
+    local targetRoot = nil
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
 
-local function GetTargetAtSecretPoint()
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local ready, root, _ = IsCharacterReady(player.Character)
             if ready then
-                local dist = (root.Position - getgenv().SecretPoint).Magnitude
-                if dist < 50 then 
-                    return root
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist < closestDist then 
+                    closestDist = dist
+                    targetRoot = root
                 end
             end
         end
     end
-    return nil
+    return targetRoot
 end
 
+-- ==========================================
+-- [[ Auto Farm Logic ]] --
+-- ==========================================
 RunService.Heartbeat:Connect(function()
     local myChar = LocalPlayer.Character
     local ready, myRoot, myHum = IsCharacterReady(myChar)
@@ -219,22 +299,18 @@ RunService.Heartbeat:Connect(function()
     if not ready then return end
 
     if getgenv().IsAlt then
-        CreatePlatform()
-        myRoot.CFrame = CFrame.new(getgenv().SecretPoint)
-        myRoot.Velocity = Vector3.new(0,0,0)
+        myRoot.Velocity = Vector3.new(0,0,0) 
     end
 
     if getgenv().IsMain then
-        CreatePlatform()
-        local targetRoot = GetTargetAtSecretPoint()
-        
+        local targetRoot = GetClosestEnemy()
         if targetRoot then
             if Camera.CameraSubject ~= myHum then
                 Camera.CameraSubject = myHum
             end
-            local stickPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -2.5)
-            local lookAtPosition = targetRoot.Position
-            myRoot.CFrame = CFrame.lookAt(stickPosition, lookAtPosition)
+            myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2.5) 
+            local lookAtPos = Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z)
+            myRoot.CFrame = CFrame.new(myRoot.Position, lookAtPos)
             myRoot.Velocity = Vector3.new(0,0,0)
         end
     end
@@ -243,12 +319,13 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.1)
-        if getgenv().IsMain and IsSafeToAttack() then
+        if getgenv().IsMain then 
             local ready, _, _ = IsCharacterReady(LocalPlayer.Character)
-            if ready then
+            if ready and not GuiService.MenuIsOpen and not UserInputService:GetFocusedTextBox() then
                 pcall(function()
                     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
                     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                    
                     local keys = {Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four}
                     for _, key in ipairs(keys) do
                         VirtualInputManager:SendKeyEvent(true, key, false, game)
@@ -261,13 +338,228 @@ task.spawn(function()
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    task.wait(1)
+-- ==========================================
+-- [[ Dash Functions (Cross Dash 0.2s) ]] --
+-- ==========================================
+
+local function GetCloseEnemyForDash(range)
+    local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+    for _, v in pairs(Players:GetPlayers()) do
+        if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+            local hum = v.Character:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 then
+                local dist = (v.Character.HumanoidRootPart.Position - myPos).Magnitude
+                if dist <= range then
+                    return v.Character.HumanoidRootPart
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function QuadBezier(t, p0, p1, p2)
+    return (1 - t)^2 * p0 + 2 * (1 - t) * t * p1 + t^2 * p2
+end
+
+local function PerformDash()
+    local Character = LocalPlayer.Character
+    if not Character then return end
+    local RootPart = Character:FindFirstChild("HumanoidRootPart")
+    local Humanoid = Character:FindFirstChild("Humanoid")
+    if not RootPart or not Humanoid then return end
+
+    local IsBlocking = false
+    if Character:FindFirstChild("Blocking") and Character.Blocking.Value == true then
+        IsBlocking = true
+    elseif Character:FindFirstChild("Guard") and Character.Guard.Value == true then
+        IsBlocking = true
+    end
+
+    local SmartTarget = nil
+    if getgenv().OppositeDash then
+        SmartTarget = GetCloseEnemyForDash(10)
+    end
+
+    local Anim = Instance.new("Animation")
+    Anim.AnimationId = DashAnimID 
+    local Track = Humanoid:LoadAnimation(Anim)
+    Track.Priority = Enum.AnimationPriority.Movement 
+    Track:Play()
+
+    local StartTime = tick()
+    local Connection
+
+    if SmartTarget then
+        -- Cross Dash (Fast Mode)
+        local P0 = RootPart.Position
+        local RelPos = SmartTarget.CFrame:PointToObjectSpace(P0)
+        local CurrentZone = ""
+        if math.abs(RelPos.Z) > math.abs(RelPos.X) then
+            if RelPos.Z < 0 then CurrentZone = "Front" else CurrentZone = "Back" end
+        else
+            if RelPos.X < 0 then CurrentZone = "Left" else CurrentZone = "Right" end
+        end
+
+        local EndOffset = CFrame.new(0,0,0)
+        local CurveType = "" 
+
+        if CurrentZone == "Front" then
+            EndOffset = CFrame.new(0, 0, 3.5)
+            CurveType = "SideStep" 
+        elseif CurrentZone == "Back" then
+            EndOffset = CFrame.new(0, 0, -3.5)
+            CurveType = "SideStep" 
+        elseif CurrentZone == "Left" then
+            EndOffset = CFrame.new(3.5, 0, 0)
+            CurveType = "BackStep" 
+        elseif CurrentZone == "Right" then
+            EndOffset = CFrame.new(-3.5, 0, 0)
+            CurveType = "BackStep" 
+        else
+            EndOffset = CFrame.new(0, 0, 3.5)
+            CurveType = "SideStep"
+        end
+
+        local P2 = (SmartTarget.CFrame * EndOffset).Position
+
+        local P1
+        if CurveType == "SideStep" then
+            local SideDir = (math.random() > 0.5) and 1 or -1
+            local P1_Offset = SmartTarget.CFrame.RightVector * SideDir * 30
+            P1 = SmartTarget.Position + P1_Offset
+        elseif CurveType == "BackStep" then
+            local Back_Offset = SmartTarget.CFrame.LookVector * -1 * 8
+            P1 = SmartTarget.Position + Back_Offset
+        end
+
+        P1 = P1 + Vector3.new(math.random(-2,2), 0, math.random(-2,2))
+        P1 = Vector3.new(P1.X, RootPart.Position.Y, P1.Z)
+        P2 = Vector3.new(P2.X, RootPart.Position.Y, P2.Z)
+
+        local CrossDashDuration = 0.2 -- ความเร็ว Cross Dash
+
+        Connection = RunService.Heartbeat:Connect(function()
+            local Elapsed = tick() - StartTime
+            local Alpha = Elapsed / CrossDashDuration
+
+            if Alpha >= 1 or not SmartTarget or not SmartTarget.Parent then
+                if Connection then Connection:Disconnect() end
+                if Track then Track:Stop() end
+                
+                if SmartTarget then
+                    local FinalCF = SmartTarget.CFrame * EndOffset
+                    RootPart.CFrame = CFrame.lookAt(FinalCF.Position, SmartTarget.Position)
+                    RootPart.Velocity = Vector3.new(0,0,0)
+                end
+                return
+            end
+
+            local CurrentP2 = (SmartTarget.CFrame * EndOffset).Position
+            CurrentP2 = Vector3.new(CurrentP2.X, RootPart.Position.Y, CurrentP2.Z)
+            local NextPos = QuadBezier(Alpha, P0, P1, CurrentP2)
+            local NewLook = CFrame.lookAt(NextPos, SmartTarget.Position)
+            RootPart.CFrame = NewLook
+            RootPart.Velocity = Vector3.new(0,0,0)
+        end)
+
+    else
+        -- Normal Dash
+        local forward = 0
+        local right = 0
+        local isPressed = false
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then forward = forward + 1 isPressed = true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then forward = forward - 1 isPressed = true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then right = right - 1 isPressed = true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then right = right + 1 isPressed = true end
+        if not isPressed then forward = -1 end
+        
+        local localDir = Vector3.new(right, 0, -forward)
+        if localDir.Magnitude > 0 then localDir = localDir.Unit end
+
+        local BV = Instance.new("BodyVelocity")
+        BV.Name = "CustomDashVelocity"
+        BV.MaxForce = Vector3.new(math.huge, 0, math.huge)
+        BV.Parent = RootPart
+
+        Connection = RunService.Heartbeat:Connect(function()
+            if not BV or not BV.Parent or tick() - StartTime >= DashTime then
+                if Connection then Connection:Disconnect() end
+                if BV then BV:Destroy() end
+                if Track then Track:Stop() end
+                return
+            end
+
+            local camCF = Camera.CFrame
+            local worldDir = camCF:VectorToWorldSpace(localDir)
+            local flatDir = worldDir * Vector3.new(1, 0, 1)
+            
+            if flatDir.Magnitude > 0 then 
+                flatDir = flatDir.Unit 
+                if not IsBlocking then
+                    local newLook = CFrame.lookAt(RootPart.Position, RootPart.Position + flatDir)
+                    RootPart.CFrame = RootPart.CFrame:Lerp(newLook, 0.5)
+                end
+            end
+            BV.Velocity = flatDir * CurrentDashSpeed
+        end)
+    end
+end
+
+local function HandleDashInput(actionName, inputState, inputObject)
+    if inputState == Enum.UserInputState.Begin and getgenv().InfDash then
+        if not UserInputService:GetFocusedTextBox() then
+            PerformDash()
+        end
+    end
+    return Enum.ContextActionResult.Pass
+end
+ContextActionService:BindAction("CustomDashAction", HandleDashInput, false, Enum.KeyCode.Q)
+
+-- ==========================================
+-- [[ Aim Lock Logic ]] --
+-- ==========================================
+local function GetClosestPlayerToMouse()
+    local closestDist = math.huge
+    local target = nil
+    local mouse = LocalPlayer:GetMouse()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(AimPart) then
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character[AimPart].Position)
+                if onScreen then
+                    local dist = (Vector2.new(mouse.X, mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                    if dist < 500 and dist < closestDist then
+                        closestDist = dist
+                        target = player.Character[AimPart]
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+RunService.RenderStepped:Connect(function()
+    if getgenv().AimSystemEnabled and getgenv().IsLocking and getgenv().LockedTarget then
+        local target = getgenv().LockedTarget
+        if target.Parent and target.Parent:FindFirstChild("Humanoid") and target.Parent.Humanoid.Health > 0 then
+            local currentCF = Camera.CFrame
+            local targetCF = CFrame.new(currentCF.Position, target.Position)
+            Camera.CFrame = currentCF:Lerp(targetCF, 1 - AimSmooth)
+        else
+            getgenv().IsLocking = false
+            getgenv().LockedTarget = nil
+        end
+    end
 end)
 
 -- ==========================================
 -- [[ UI Elements ]] --
 -- ==========================================
+
+FarmTab:CreateSection("Main Account")
 
 local MainToggle = FarmTab:CreateToggle({
     Name = "Gold Farm ( Main Acc )",
@@ -275,9 +567,17 @@ local MainToggle = FarmTab:CreateToggle({
     Flag = "MainRole",
     Callback = function(Value)
         getgenv().IsMain = Value
-        if Value then getgenv().IsAlt = false end
+        if Value then 
+            getgenv().IsAlt = false 
+        else
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                Camera.CameraSubject = LocalPlayer.Character.Humanoid
+            end
+        end
     end,
 })
+
+FarmTab:CreateSection("Alt Account")
 
 local AltToggle = FarmTab:CreateToggle({
     Name = "Gold Farm ( Alt Acc )",
@@ -285,16 +585,41 @@ local AltToggle = FarmTab:CreateToggle({
     Flag = "AltRole",
     Callback = function(Value)
         getgenv().IsAlt = Value
-        if Value then getgenv().IsMain = false end
+        if Value then 
+            getgenv().IsMain = false 
+        end
     end,
 })
 
+local ResetDelaySlider = FarmTab:CreateSlider({
+    Name = "Loop Reset Delay",
+    Range = {0, 5},
+    Increment = 0.5,
+    Suffix = "s",
+    CurrentValue = 1,
+    Flag = "ResetDelay",
+    Callback = function(Value)
+        getgenv().ResetDelay = Value
+    end,
+})
+
+
+CombatTab:CreateSection("Movement")
 local InfDashToggle = CombatTab:CreateToggle({
     Name = "Infinite Dash",
     CurrentValue = false,
     Flag = "InfDash",
     Callback = function(Value)
         getgenv().InfDash = Value
+    end,
+})
+
+local OppositeDashToggle = CombatTab:CreateToggle({
+    Name = "Side Dast ( 10 Stud )",
+    CurrentValue = false,
+    Flag = "OppositeDash",
+    Callback = function(Value)
+        getgenv().OppositeDash = Value
     end,
 })
 
@@ -310,16 +635,13 @@ local SpeedSlider = CombatTab:CreateSlider({
     end,
 })
 
--- [[ AIM ASSIST UI ]] --
 CombatTab:CreateSection("Aim Assist")
-
 local AimEnableToggle = CombatTab:CreateToggle({
     Name = "Enable Aim Assist",
     CurrentValue = false,
     Flag = "AimSystemEnabled",
     Callback = function(Value)
         getgenv().AimSystemEnabled = Value
-        -- ถ้าปิดสวิตช์ ให้รีเซ็ตค่าล็อคด้วย
         if not Value then
             getgenv().IsLocking = false
             getgenv().LockedTarget = nil
@@ -330,43 +652,59 @@ local AimEnableToggle = CombatTab:CreateToggle({
 local AimLockBind = CombatTab:CreateKeybind({
     Name = "Keybind Aim Assist",
     CurrentKeybind = "E",
-    HoldToInteract = false, -- ตั้งเป็น false คือกดทีเดียวติด/ดับ
+    HoldToInteract = false, 
     Flag = "AimLockBind",
     Callback = function(Keybind)
-        -- เช็คว่าเปิด Master Switch หรือยัง
         if not getgenv().AimSystemEnabled then 
-            Rayfield:Notify({
-                Title = "Aim Lock",
-                Content = "Please Enable Switch First!",
-                Duration = 2,
-                Image = nil,
-            })
+            Rayfield:Notify({Title = "Aim Lock", Content = "Enable Switch First!", Duration = 2})
             return 
         end
-
-        -- Logic สลับสถานะ (Sticky Logic)
         if getgenv().IsLocking then
-            -- ถ้าล็อคอยู่ -> ปลดล็อค
             getgenv().IsLocking = false
             getgenv().LockedTarget = nil
             Rayfield:Notify({Title = "Aim Lock", Content = "Unlocked", Duration = 1})
         else
-            -- ถ้าไม่ได้ล็อค -> หาตัวใหม่
             local target = GetClosestPlayerToMouse()
             if target then
                 getgenv().LockedTarget = target
                 getgenv().IsLocking = true
                 Rayfield:Notify({Title = "Aim Lock", Content = "Locked: " .. target.Parent.Name, Duration = 1})
             else
-                Rayfield:Notify({Title = "Aim Lock", Content = "No Target Found!", Duration = 1})
+                Rayfield:Notify({Title = "Aim Lock", Content = "No Target!", Duration = 1})
             end
         end
     end,
 })
 
+-- ==========================================
+-- [[ HITBOX TAB ]] --
+-- ==========================================
+HitboxTab:CreateSection("Akainu Specific")
+
+local HitboxToggle = HitboxTab:CreateToggle({
+    Name = "Hitbox Expender ( Akainu only )",
+    CurrentValue = false,
+    Flag = "AkainuHitbox",
+    Callback = function(Value)
+        getgenv().AkainuHitbox = Value
+    end,
+})
+
+local HitboxSizeSlider = HitboxTab:CreateSlider({
+    Name = "Hitbox Size",
+    Range = {50, 10000000},
+    Increment = 10,
+    Suffix = "Size",
+    CurrentValue = 100,
+    Flag = "AkainuSize",
+    Callback = function(Value)
+        getgenv().AkainuSize = Value
+    end,
+})
+
 Rayfield:Notify({
     Title = "Script Loaded",
-    Content = "Aim Lock Fixed (Use E)",
+    Content = "ABA Script",
     Duration = 5,
     Image = nil,
 })
